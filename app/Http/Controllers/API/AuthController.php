@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
-use App\Contracts\AuthServiceInterface;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -14,12 +13,6 @@ use OpenApi\Annotations as OA;
 
 class AuthController extends Controller
 {
-    protected AuthServiceInterface $authService;
-
-    public function __construct(AuthServiceInterface $authService)
-    {
-        $this->authService = $authService;
-    }
     /**
      * @OA\Post(
      *     path="/api/auth/register",
@@ -70,16 +63,21 @@ class AuthController extends Controller
                 'password' => 'required|string|min:8|confirmed',
             ]);
 
-            $result = $this->authService->register([
+            $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
-                'password' => $request->password,
+                'password' => Hash::make($request->password),
             ]);
+
+            $token = $user->createToken('auth_token')->plainTextToken;
 
             return response()->json([
                 'success' => true,
                 'message' => 'Utilisateur créé avec succès',
-                'data' => $result
+                'data' => [
+                    'user' => $user,
+                    'token' => $token
+                ]
             ], 201);
 
         } catch (ValidationException $e) {
@@ -129,29 +127,29 @@ class AuthController extends Controller
      */
     public function login(Request $request): JsonResponse
     {
-        try {
-            $request->validate([
-                'email' => 'required|email',
-                'password' => 'required',
-            ]);
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required',
+        ]);
 
-            $result = $this->authService->login([
-                'email' => $request->email,
-                'password' => $request->password,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Connexion réussie',
-                'data' => $result
-            ]);
-
-        } catch (\Exception $e) {
+        if (!Auth::attempt($request->only('email', 'password'))) {
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage()
+                'message' => 'Identifiants incorrects'
             ], 401);
         }
+
+        $user = Auth::user();
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Connexion réussie',
+            'data' => [
+                'user' => $user,
+                'token' => $token
+            ]
+        ]);
     }
 
     /**
@@ -180,19 +178,11 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
-        try {
-            $this->authService->logout($request->user());
+        $request->user()->currentAccessToken()->delete();
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Déconnexion réussie'
-            ]);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Erreur lors de la déconnexion'
-            ], 500);
-        }
+        return response()->json([
+            'success' => true,
+            'message' => 'Déconnexion réussie'
+        ]);
     }
 }
